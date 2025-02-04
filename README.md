@@ -127,14 +127,23 @@ This enumerates all domain-joined machines, scans their registries and netstat o
 ## OPSEC Considerations
 
 1. **Logs & Artifacts**  
-   - The script writes a small `.log` file to the `ADMIN$` share on each target to capture netstat output. We then read that file back via SMB. That filename is randomized but can still be found in security logs.  
-2. **Event Logs**  
+   - The script writes a small `.log` file to the `ADMIN$` share on each target to capture netstat output. We then read that file back via SMB. That filename is randomized but can still be found in security logs.
+2. **Use of `cmd.exe /Q /c`**  
+   - By default, pivOT executes netstat via:  
+     ```batch
+     cmd.exe /Q /c netstat -ano > \\127.0.0.1\ADMIN$\tmp_XXXXXX.log
+     ```
+   - This can trigger detection rules that look for specific `cmd.exe /c` patterns in event logs.  
+   - **Alternative Execution**  
+     - You can modify the script to invoke PowerShell or rename `cmd.exe` to reduce detectability (e.g., use `rundll32`, `wmic /OUTPUT:`, or `powershell.exe -Command netstat -ano`).  
+     - Consider updating the command line in the function `wmi_exec_command` if your threat model requires lower detectability.  
+3. **Event Logs**  
    - **Process Execution** (Event ID `4688`) may be generated on the target when netstat is invoked via WMI.  
    - **Remote Registry** requests can generate logs such as Event ID `5145` (if logging is enabled) or other access events.  
    - **SMB Logon Events** (e.g., `4624`, `4648`) may appear if the environment monitors SMB authentications.  
-3. **Admin Rights Required**  
+5. **Admin Rights Required**  
    - Remote registry and WMI/DCOM both require local admin privileges on the target. This is normal but will raise typical Windows security events if auditing is configured.  
-4. **Recommended Usage**  
+5. **Recommended Usage**  
    - For stealth, minimize concurrency (`--threads`) and possibly randomize or slow your scans to reduce log volume.  
    - If you are worried about detection on the remote host, consider alternate output filenames and share usage.
 
