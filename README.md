@@ -133,7 +133,7 @@ This enumerates all domain-joined machines, scans their registries and netstat o
      ```batch
      cmd.exe /Q /c netstat -ano > \\127.0.0.1\ADMIN$\tmp_XXXXXX.log
      ```
-   - This can trigger detection rules that look for specific `cmd.exe /c` patterns in event logs.  
+   - This can trigger detection rules that look for specific `cmd.exe /Q /c` patterns in event logs.  
    - **Alternative Execution**  
      - You can modify the script to invoke PowerShell or rename `cmd.exe` to reduce detectability (e.g., use `rundll32`, `wmic /OUTPUT:`, or `powershell.exe -Command netstat -ano`).  
      - Consider updating the command line in the function `wmi_exec_command` if your threat model requires lower detectability.  
