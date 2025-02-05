@@ -6,7 +6,6 @@
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://GitHub.com/loosehose/pivOT/graphs/commit-activity)
 [![GitHub issues](https://img.shields.io/github/issues/loosehose/pivOT.svg)](https://GitHub.com/loosehose/pivOT/issues/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
-[![GitHub Actions](https://github.com/loosehose/pivOT/workflows/Black%20Format%20Check/badge.svg)](https://github.com/loosehose/pivOT/actions)
 
 **pivOT** is a Python-based red team utility that identifies potential network pivots to OT (Operational Technology) environments. It does so by:
 
