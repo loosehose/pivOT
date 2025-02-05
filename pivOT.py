@@ -13,35 +13,23 @@ import sys
 import time
 import traceback
 import uuid
-from typing import List, Tuple, Dict, Optional
+from typing import Dict, List, Optional, Tuple
 
-# 3rd-party
 import colorama
 from colorama import Fore, Style
-from ldap3 import Server, Connection, NTLM, ALL
-
-# Impacket
-from impacket.smbconnection import SMBConnection, SessionError
 from impacket.dcerpc.v5 import rrp, transport
-from impacket.dcerpc.v5.rpcrt import DCERPCException
-from impacket.dcerpc.v5.dcomrt import DCOMConnection
 from impacket.dcerpc.v5.dcom import wmi
+from impacket.dcerpc.v5.dcomrt import DCOMConnection
 from impacket.dcerpc.v5.dtypes import NULL
+from impacket.dcerpc.v5.rpcrt import DCERPCException
+from impacket.smbconnection import SMBConnection, SessionError
+from ldap3 import ALL, NTLM, Connection, Server
 
-# Constants for older Impacket
-HKEY_LOCAL_MACHINE = 0x80000002
-MAXIMUM_ALLOWED = 0x02000000
 
-
-###############################################################################
-# LOGGER
-###############################################################################
 class Logger:
-    """
-    Handles color-coded logging (error, info, debug) in a single place.
-    """
+    """Handles color-coded logging (error, info, debug) in a single place."""
 
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = False) -> None:
         colorama.init(autoreset=True)
         self.debug_mode = debug
         self.RED = Fore.RED
@@ -51,17 +39,17 @@ class Logger:
         self.MAGENTA = Fore.MAGENTA
         self.RESET = Style.RESET_ALL
 
-    def error(self, message: str):
+    def error(self, message: str) -> None:
         print(f"{self.RED}{message}{self.RESET}")
 
-    def info(self, message: str):
+    def info(self, message: str) -> None:
         print(f"{self.CYAN}{message}{self.RESET}")
 
-    def debug(self, message: str):
+    def debug(self, message: str) -> None:
         if self.debug_mode:
             print(f"{self.YELLOW}[debug]{self.RESET} {message}")
 
-    def banner(self):
+    def banner(self) -> None:
         print(
             f"""{self.MAGENTA}
            _       ____  ______
@@ -76,21 +64,16 @@ class Logger:
         )
 
 
-###############################################################################
-# UTILITIES
-###############################################################################
 class OTSubnetManager:
-    """
-    Responsible for parsing and handling OT subnets,
-    and checking if an IP is in any OT subnet.
-    """
+    """Responsible for parsing and handling OT subnets."""
 
-    def __init__(self, subnet_strings: List[str], logger: Logger):
+    def __init__(self, subnet_strings: List[str], logger: Logger) -> None:
         self.logger = logger
         self.ot_networks = self._parse_ot_subnets(subnet_strings)
 
     def _parse_ot_subnets(
-        self, subnet_strings: List[str]
+        self,
+        subnet_strings: List[str],
     ) -> List[ipaddress.ip_network]:
         networks = []
         for subnet in subnet_strings:
@@ -98,7 +81,6 @@ class OTSubnetManager:
             if not subnet:
                 continue
             if "/" not in subnet:
-                # Try to infer a mask if one isn't present.
                 if subnet.count(".") == 2 and subnet.endswith("."):
                     subnet = f"{subnet}0.0/16"
                 else:
@@ -114,15 +96,12 @@ class OTSubnetManager:
         try:
             ip_obj = ipaddress.ip_address(ip_address)
         except ValueError:
-            # Not a valid IP string
             return False
         return any(ip_obj in net for net in self.ot_networks)
 
 
 def quick_smb_check(host: str, port: int = 445, timeout: float = 3.0) -> bool:
-    """
-    Quick test to see if TCP/445 is open on the target.
-    """
+    """Quick test to see if TCP/445 is open on the target."""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -130,13 +109,8 @@ def quick_smb_check(host: str, port: int = 445, timeout: float = 3.0) -> bool:
         return False
 
 
-###############################################################################
-# LDAP ENUMERATOR
-###############################################################################
 class LDAPEnumerator:
-    """
-    Handles LDAP connectivity and domain computer enumeration.
-    """
+    """Handles LDAP connectivity and domain computer enumeration."""
 
     def __init__(
         self,
@@ -148,7 +122,7 @@ class LDAPEnumerator:
         nt_hash: str,
         use_kerberos: bool,
         logger: Logger,
-    ):
+    ) -> None:
         self.domain = domain
         self.username = username
         self.password = password
@@ -159,16 +133,13 @@ class LDAPEnumerator:
         self.logger = logger
 
     def _create_ldap3_connection(self) -> Connection:
-        """
-        Establishes an LDAP3 connection with an NTLM bind (optionally Kerberos).
-        """
+        """Establishes an LDAP3 connection with an NTLM bind."""
         host_for_ldap = self.dc_ip if self.dc_ip else self.domain
         server_url = f"ldap://{host_for_ldap}:389"
         self.logger.debug(f"Attempting LDAP connect to: {server_url}")
 
         server = Server(server_url, get_info=ALL, use_ssl=False)
 
-        # If NT hash is provided, override the password with LM:NT or :NT
         if self.nt_hash:
             pass_the_hash = f"{self.lm_hash if self.lm_hash else ''}:{self.nt_hash}"
             effective_password = pass_the_hash
@@ -198,7 +169,6 @@ class LDAPEnumerator:
             if not conn.bound:
                 return computers
 
-            # Attempt to derive the base DN from server info
             base_dn = None
             if conn.server.info:
                 naming_contexts = conn.server.info.naming_contexts
@@ -210,12 +180,10 @@ class LDAPEnumerator:
 
             self.logger.debug(f"Using baseDN: {base_dn}")
 
-            # Search for all computer objects
             search_filter = "(objectClass=computer)"
             attributes = ["dNSHostName", "sAMAccountName"]
             conn.search(base_dn, search_filter, attributes=attributes, paged_size=1000)
 
-            # Extract DNS or SAM name
             for entry in conn.response:
                 if entry.get("type") == "searchResEntry":
                     att_map = entry.get("attributes", {})
@@ -240,15 +208,10 @@ class LDAPEnumerator:
         return list(set(computers)) if computers else []
 
 
-###############################################################################
-# SMB CONNECTION FACTORY
-###############################################################################
 class SMBConnectionFactory:
-    """
-    Creates SMBConnection objects with Kerberos → NTLM fallback logic.
-    """
+    """Creates SMBConnection objects with Kerberos → NTLM fallback logic."""
 
-    def __init__(self, logger: Logger):
+    def __init__(self, logger: Logger) -> None:
         self.logger = logger
 
     def create_smb_session_kerb_fallback(
@@ -262,14 +225,19 @@ class SMBConnectionFactory:
         use_kerberos: bool = False,
     ) -> SMBConnection:
         if use_kerberos:
-            # Attempt Kerberos first
             try:
                 self.logger.debug("Attempting Kerberos SMB login...")
                 smb_conn = SMBConnection(
-                    remoteName=target_host, remoteHost=target_host, sess_port=445
+                    remoteName=target_host,
+                    remoteHost=target_host,
+                    sess_port=445,
                 )
                 smb_conn.kerberosLogin(
-                    username, password, domain, lmhash=lm_hash, nthash=nt_hash
+                    username,
+                    password,
+                    domain,
+                    lmhash=lm_hash,
+                    nthash=nt_hash,
                 )
                 self.logger.debug("Kerberos SMB login succeeded!")
                 return smb_conn
@@ -278,12 +246,15 @@ class SMBConnectionFactory:
                     kerb_exc.getErrorCode() if hasattr(kerb_exc, "getErrorCode") else 0
                 )
                 self.logger.debug(
-                    f"Kerberos login failed with code=0x{err_code:x}, falling back to NTLM..."
+                    f"Kerberos login failed with code=0x{err_code:x}, "
+                    "falling back to NTLM...",
                 )
 
         self.logger.debug("Using NTLM/pass-the-hash.")
         smb_conn = SMBConnection(
-            remoteName=target_host, remoteHost=target_host, sess_port=445
+            remoteName=target_host,
+            remoteHost=target_host,
+            sess_port=445,
         )
         smb_conn.login(
             user=username,
@@ -296,20 +267,15 @@ class SMBConnectionFactory:
         return smb_conn
 
 
-###############################################################################
-# REGISTRY SEARCHER
-###############################################################################
 class RegistrySearcher:
-    """
-    Checks for references to IP addresses within OT subnets in the remote registry.
-    """
+    """Checks for references to IP addresses within OT subnets in remote registry."""
 
     def __init__(
         self,
         smb_conn: SMBConnection,
         ot_subnet_manager: OTSubnetManager,
         logger: Logger,
-    ):
+    ) -> None:
         self.smb_conn = smb_conn
         self.logger = logger
         self.ot_subnet_manager = ot_subnet_manager
@@ -343,11 +309,9 @@ class RegistrySearcher:
                     sub_key_name = enum_key["lpNameOut"]
                     idx += 1
 
-                    # Open subkey
                     sub_open = rrp.hBaseRegOpenKey(dce, interfaces_handle, sub_key_name)
                     sub_handle = sub_open["phkResult"]
 
-                    # Enumerate values
                     val_idx = 0
                     while True:
                         try:
@@ -359,13 +323,12 @@ class RegistrySearcher:
                             raw_data = valenum["lpData"]
                             data_parsed = rrp.unpackValue(value_type, raw_data)
 
-                            # Check for single string or list of strings
                             if isinstance(data_parsed, str):
                                 if self.ot_subnet_manager.is_ip_in_ot_subnets(
-                                    data_parsed
+                                    data_parsed,
                                 ):
                                     matches.append(
-                                        (sub_key_name, value_name, data_parsed)
+                                        (sub_key_name, value_name, data_parsed),
                                     )
                             elif isinstance(data_parsed, list):
                                 for item in data_parsed:
@@ -373,7 +336,6 @@ class RegistrySearcher:
                                         matches.append((sub_key_name, value_name, item))
 
                         except DCERPCException as dcerpc_exc:
-                            # 0x103 means no more data
                             if (
                                 hasattr(dcerpc_exc, "error_code")
                                 and dcerpc_exc.error_code == 0x103
@@ -381,14 +343,13 @@ class RegistrySearcher:
                                 break
                             else:
                                 self.logger.debug(
-                                    f"Registry value enum error: {dcerpc_exc}"
+                                    f"Registry value enum error: {dcerpc_exc}",
                                 )
                                 break
 
                     rrp.hBaseRegCloseKey(dce, sub_handle)
 
                 except DCERPCException as dcerpc_exc:
-                    # 0x103 means no more subkeys
                     if (
                         hasattr(dcerpc_exc, "error_code")
                         and dcerpc_exc.error_code == 0x103
@@ -418,13 +379,8 @@ class RegistrySearcher:
         return matches
 
 
-###############################################################################
-# WMI EXECUTOR
-###############################################################################
 class WMIExecutor:
-    """
-    Handles WMI/DCOM-based command execution (e.g., netstat).
-    """
+    """Handles WMI/DCOM-based command execution (e.g., netstat)."""
 
     def __init__(
         self,
@@ -437,7 +393,7 @@ class WMIExecutor:
         lm_hash: str,
         nt_hash: str,
         logger: Logger,
-    ):
+    ) -> None:
         self.smb_conn = smb_conn
         self.target = target
         self.username = username
@@ -454,14 +410,11 @@ class WMIExecutor:
     def _execute_command(self, command: str) -> str:
         share_name = "ADMIN$"
         output_file = self._generate_random_filename()
-
         remote_output_path = f"\\\\127.0.0.1\\{share_name}\\{output_file}"
-        local_output_path = output_file
 
         self.logger.debug(f"Using output file: {output_file}")
         self.logger.debug(f"Remote path: {remote_output_path}")
 
-        # Connect DCOM
         dcom = DCOMConnection(
             self.target,
             self.username,
@@ -477,7 +430,8 @@ class WMIExecutor:
 
         try:
             i_interface = dcom.CoCreateInstanceEx(
-                wmi.CLSID_WbemLevel1Login, wmi.IID_IWbemLevel1Login
+                wmi.CLSID_WbemLevel1Login,
+                wmi.IID_IWbemLevel1Login,
             )
             i_wbem_login = wmi.IWbemLevel1Login(i_interface)
             i_wbem_services = i_wbem_login.NTLMLogin("//./root/cimv2", NULL, NULL)
@@ -492,10 +446,8 @@ class WMIExecutor:
             if process_info.ReturnValue != 0:
                 return f"[!] WMI command exec failed: {process_info.ReturnValue}"
 
-            # Wait a bit for the command to complete
             time.sleep(3)
 
-            # Read the output file via SMB
             output_data = b""
             max_retries = 3
             attempts = 0
@@ -503,31 +455,30 @@ class WMIExecutor:
             while attempts < max_retries:
                 try:
                     self.logger.debug(
-                        f"Reading attempt {attempts + 1} from {share_name}:{local_output_path}"
+                        f"Reading attempt {attempts + 1} from {share_name}:{output_file}",
                     )
 
                     def output_callback(data_block):
                         nonlocal output_data
                         output_data += data_block
 
-                    self.smb_conn.getFile(
-                        share_name, local_output_path, output_callback
-                    )
+                    self.smb_conn.getFile(share_name, output_file, output_callback)
                     break
                 except Exception as read_exc:
                     attempts += 1
                     if attempts == max_retries:
                         self.logger.debug(f"Final read attempt failed: {str(read_exc)}")
-                        return f"[!] Error reading output after {max_retries} attempts: {read_exc}"
+                        return (
+                            f"[!] Error reading output after {max_retries} attempts: "
+                            f"{read_exc}"
+                        )
                     time.sleep(2)
 
-            # Delete remote file
             try:
-                self.smb_conn.deleteFile(share_name, local_output_path)
+                self.smb_conn.deleteFile(share_name, output_file)
             except:
                 pass
 
-            # Attempt to decode
             try:
                 return output_data.decode("cp437", errors="replace")
             except:
@@ -537,24 +488,20 @@ class WMIExecutor:
             dcom.disconnect()
 
     def get_netstat_ot_matches(self, ot_subnet_manager: OTSubnetManager) -> List[str]:
-        """
-        Runs `netstat -ano` via WMI and returns lines referencing OT subnets.
-        """
         findings = []
         netstat_out = self._execute_command("netstat -ano")
         if netstat_out.startswith("[!]"):
-            # Some error string
             findings.append(netstat_out)
             return findings
 
         for line in netstat_out.splitlines():
             line_stripped = line.strip()
-            # Skip header lines or empties
             if not line_stripped or line_stripped.startswith(("Proto", "Active")):
                 continue
 
             match = re.match(
-                r"^(TCP|UDP)\s+([\d\.]+):(\d+)\s+([\d\.]+):(\d+)\s+(.*)", line_stripped
+                r"^(TCP|UDP)\s+([\d\.]+):(\d+)\s+([\d\.]+):(\d+)\s+(.*)",
+                line_stripped,
             )
             if match:
                 remote_ip = match.group(4)
@@ -564,13 +511,8 @@ class WMIExecutor:
         return findings
 
 
-###############################################################################
-# OT SCANNER
-###############################################################################
 class OTScanner:
-    """
-    Orchestrates the checks for a single target: SMB connectivity, registry, WMI netstat.
-    """
+    """Orchestrates checks for a single target: SMB connectivity, registry, WMI netstat."""
 
     def __init__(
         self,
@@ -584,7 +526,7 @@ class OTScanner:
         do_registry: bool,
         do_netstat: bool,
         logger: Logger,
-    ):
+    ) -> None:
         self.domain = domain
         self.username = username
         self.password = password
@@ -608,7 +550,6 @@ class OTScanner:
 
         result = {"target": target, "registry_ot_matches": [], "netstat_ot_matches": []}
 
-        # Create SMB session
         try:
             smb_conn = self.smb_factory.create_smb_session_kerb_fallback(
                 target,
@@ -629,11 +570,12 @@ class OTScanner:
             result["netstat_ot_matches"] = [error_message]
             return result
 
-        # Registry check
         if self.do_registry:
             try:
                 reg_searcher = RegistrySearcher(
-                    smb_conn, self.ot_subnet_manager, self.logger
+                    smb_conn,
+                    self.ot_subnet_manager,
+                    self.logger,
                 )
                 reg_hits = reg_searcher.search_for_ot()
                 result["registry_ot_matches"] = reg_hits
@@ -650,7 +592,6 @@ class OTScanner:
                     traceback.print_exc()
                 result["registry_ot_matches"] = [err_msg]
 
-        # Netstat check
         if self.do_netstat:
             wmi_exec = WMIExecutor(
                 smb_conn=smb_conn,
@@ -670,15 +611,12 @@ class OTScanner:
         return result
 
 
-###############################################################################
-# OUTPUT HELPERS
-###############################################################################
-def save_results_json(filename: str, data: List[Dict]):
+def save_results_json(filename: str, data: List[Dict]) -> None:
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
 
-def save_results_csv(filename: str, data: List[Dict]):
+def save_results_csv(filename: str, data: List[Dict]) -> None:
     with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["Target", "RegistryOTMatches", "NetstatOTMatches"])
@@ -689,14 +627,14 @@ def save_results_csv(filename: str, data: List[Dict]):
             writer.writerow([target, reg, net])
 
 
-###############################################################################
-# MAIN
-###############################################################################
-def main():
-    logger = Logger()  # temp instance for early usage (no debug available yet)
+def main() -> None:
+    logger = Logger()
 
     parser = argparse.ArgumentParser(
-        description="pivOT: WMI/Registry-based checks for OT IP addresses, supporting pass-the-hash & password auth."
+        description=(
+            "pivOT: WMI/Registry-based checks for OT IP addresses, "
+            "supporting pass-the-hash & password auth."
+        ),
     )
     parser.add_argument(
         "-d",
@@ -705,10 +643,16 @@ def main():
         help="Domain name for SMB/DCOM/LDAP operations.",
     )
     parser.add_argument(
-        "-u", "--username", required=True, help="User account for authentication."
+        "-u",
+        "--username",
+        required=True,
+        help="User account for authentication.",
     )
     parser.add_argument(
-        "-p", "--password", default="", help="Password (omit if pass-the-hash)."
+        "-p",
+        "--password",
+        default="",
+        help="Password (omit if pass-the-hash).",
     )
     parser.add_argument(
         "-H",
@@ -723,21 +667,34 @@ def main():
         help="Use Kerberos (requires valid TGT or password).",
     )
     parser.add_argument(
-        "--dc-ip", help="Domain Controller IP for LDAP or Kerberos if needed."
-    )
-
-    parser.add_argument("-t", "--target", help="Single target host (hostname or IP).")
-    parser.add_argument(
-        "-f", "--targets-file", help="File with a list of targets, one per line."
+        "--dc-ip",
+        help="Domain Controller IP for LDAP or Kerberos if needed.",
     )
     parser.add_argument(
-        "--threads", type=int, default=5, help="Number of parallel threads to use."
+        "-t",
+        "--target",
+        help="Single target host (hostname or IP).",
     )
     parser.add_argument(
-        "--no-registry", action="store_true", help="Skip the registry check."
+        "-f",
+        "--targets-file",
+        help="File with a list of targets, one per line.",
     )
     parser.add_argument(
-        "--no-netstat", action="store_true", help="Skip the netstat check."
+        "--threads",
+        type=int,
+        default=5,
+        help="Number of parallel threads to use.",
+    )
+    parser.add_argument(
+        "--no-registry",
+        action="store_true",
+        help="Skip the registry check.",
+    )
+    parser.add_argument(
+        "--no-netstat",
+        action="store_true",
+        help="Skip the netstat check.",
     )
     parser.add_argument(
         "--ot-subnets",
@@ -755,28 +712,29 @@ def main():
         choices=["json", "csv"],
         help="Save results in JSON or CSV format.",
     )
-    parser.add_argument("--output-file", help="Output filename for the results.")
     parser.add_argument(
-        "--debug", action="store_true", help="Enable verbose debug output."
+        "--output-file",
+        help="Output filename for the results.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debug output.",
     )
 
     args = parser.parse_args()
 
-    # Re-initialize the logger with the chosen debug setting
     logger = Logger(debug=args.debug)
     logger.banner()
 
-    # Handle pass-the-hash inputs
     lm_hash, nt_hash = "", ""
     if args.hashes:
         parts = args.hashes.split(":")
         if len(parts) == 2:
             lm_hash, nt_hash = parts
         else:
-            # If there's only one part, treat it as the NT hash
             lm_hash, nt_hash = "", parts[0]
 
-    # Gather target hosts
     targets = []
     if args.targets_file:
         with open(args.targets_file, "r") as tf:
@@ -787,7 +745,6 @@ def main():
     elif args.target:
         targets = [args.target]
     else:
-        # If no targets given, optionally enumerate via LDAP
         if args.ldap_enum:
             logger.debug("No direct targets. Enumerating from LDAP...")
             ldap_enum = LDAPEnumerator(
@@ -854,12 +811,27 @@ def main():
             except Exception as scan_exc:
                 if args.debug:
                     traceback.print_exc()
+                results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.threads) as executor:
+        future_to_host = {
+            executor.submit(scanner.check_target_for_ot, t): t for t in targets
+        }
+
+        completed = 0
+        total = len(future_to_host)
+        for future in concurrent.futures.as_completed(future_to_host):
+            host = future_to_host[future]
+            try:
+                scan_result = future.result()
+                results.append(scan_result)
+            except Exception as scan_exc:
+                if args.debug:
+                    traceback.print_exc()
                 logger.error(f"[!] Exception scanning {host}: {scan_exc}")
             finally:
                 completed += 1
                 logger.info(f"[*] Completed {completed}/{total}: {host}")
 
-    # Present the final results in the console
     print(
         f"\n{Fore.BLUE}================= SCAN RESULTS ================={Style.RESET_ALL}"
     )
@@ -868,7 +840,6 @@ def main():
         registry_matches = r["registry_ot_matches"]
         netstat_matches = r["netstat_ot_matches"]
 
-        # Registry hits
         if run_registry_check:
             if (
                 len(registry_matches) == 1
@@ -884,14 +855,13 @@ def main():
                     if isinstance(item, tuple) and len(item) == 3:
                         iface_key, value_name, ip_val = item
                         print(
-                            f"    Interface={iface_key}, Key={value_name}, Value={ip_val}"
+                            f"    Interface={iface_key}, Key={value_name}, Value={ip_val}",
                         )
                     else:
                         print(f"    {item}")
             else:
                 print("  [Registry] No OT references found.")
 
-        # Netstat hits
         if run_netstat_check:
             if len(netstat_matches) == 1 and netstat_matches[0].startswith("[!]"):
                 logger.error(f"  [Netstat] {netstat_matches[0]}")
@@ -906,7 +876,6 @@ def main():
             else:
                 print("  [Netstat] No OT connections found.")
 
-    # Save to file if requested
     if args.output_format and args.output_file:
         if args.output_format == "json":
             save_results_json(args.output_file, results)
