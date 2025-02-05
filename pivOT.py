@@ -812,25 +812,6 @@ def main() -> None:
                 if args.debug:
                     traceback.print_exc()
                 results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.threads) as executor:
-        future_to_host = {
-            executor.submit(scanner.check_target_for_ot, t): t for t in targets
-        }
-
-        completed = 0
-        total = len(future_to_host)
-        for future in concurrent.futures.as_completed(future_to_host):
-            host = future_to_host[future]
-            try:
-                scan_result = future.result()
-                results.append(scan_result)
-            except Exception as scan_exc:
-                if args.debug:
-                    traceback.print_exc()
-                logger.error(f"[!] Exception scanning {host}: {scan_exc}")
-            finally:
-                completed += 1
-                logger.info(f"[*] Completed {completed}/{total}: {host}")
 
     print(
         f"\n{Fore.BLUE}================= SCAN RESULTS ================={Style.RESET_ALL}"
